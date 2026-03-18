@@ -1,0 +1,25 @@
+{
+  "name": "Cultura Asturias",
+  "short_name": "Cultura AS",
+  "description": "Agenda cultural de Asturias — Gijón, Oviedo, Avilés y más",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0f1a14",
+  "theme_color": "#0f1a14",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://api.iconify.design/emojione-monotone:mountain.svg?color=%234ade80&width=192&height=192",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://api.iconify.design/emojione-monotone:mountain.svg?color=%234ade80&width=512&height=512",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["lifestyle", "entertainment", "education"]
+}
