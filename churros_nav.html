@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>¿Dónde están los churrinos?</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Mono:wght@400;700&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --accent: #ff6b35;
+    --accent2: #ffd23f;
+    --glow: rgba(255, 107, 53, 0.4);
+    --text: #f0ece4;
+    --muted: #6b6870;
+    --success: #4ecca3;
+    --success-glow: rgba(78, 204, 163, 0.4);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Animated grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: 
+      linear-gradient(rgba(255,107,53,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,107,53,0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+    animation: gridPulse 4s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes gridPulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+
+  /* Radial glow */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--glow) 0%, transparent 70%);
+    pointer-events: none;
+    transition: background 1s ease;
+  }
+
+  body.success-mode::after {
+    background: radial-gradient(circle, var(--success-glow) 0%, transparent 70%);
+  }
+
+  .container {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 30px 20px;
+    width: 100%;
+    max-width: 420px;
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+  }
+
+  .header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(2rem, 8vw, 3.5rem);
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    text-shadow: 0 0 20px var(--glow), 0 0 60px var(--glow);
+    line-height: 1;
+  }
+
+  .header .subtitle {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+
+  /* Compass card */
+  .compass-card {
+    background: var(--surface);
+    border: 1px solid rgba(255,107,53,0.2);
+    border-radius: 4px;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    width: 100%;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .compass-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scanline 3s linear infinite;
+  }
+
+  @keyframes scanline {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Arrow wrapper */
+  .arrow-wrap {
+    width: 160px;
+    height: 160px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Orbit rings */
+  .ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(255,107,53,0.15);
+    animation: rotate 10s linear infinite;
+  }
+  .ring:nth-child(1) { width: 150px; height: 150px; animation-duration: 12s; }
+  .ring:nth-child(2) { width: 120px; height: 120px; animation-duration: 8s; animation-direction: reverse; }
+
+  @keyframes rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  /* The arrow SVG */
+  .arrow-container {
+    position: absolute;
+    width: 90px;
+    height: 90px;
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    filter: drop-shadow(0 0 12px var(--accent));
+  }
+
+  .arrow-container svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Success state */
+  .success-icon {
+    display: none;
+    width: 90px;
+    height: 90px;
+    align-items: center;
+    justify-content: center;
+    font-size: 60px;
+    animation: bounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    filter: drop-shadow(0 0 20px var(--success-glow));
+  }
+
+  @keyframes bounce {
+    0% { transform: scale(0); }
+    100% { transform: scale(1); }
+  }
+
+  /* Info row */
+  .info-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .info-box {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,107,53,0.1);
+    border-radius: 3px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .info-box .label {
+    font-size: 0.55rem;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .info-box .value {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.6rem;
+    color: var(--accent2);
+    letter-spacing: 0.05em;
+    line-height: 1;
+  }
+
+  .info-box .unit {
+    font-size: 0.6rem;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* Message */
+  .message {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(1.4rem, 6vw, 2rem);
+    letter-spacing: 0.08em;
+    text-align: center;
+    color: var(--accent);
+    text-shadow: 0 0 20px var(--glow);
+    min-height: 2.5rem;
+    transition: all 0.3s ease;
+  }
+
+  .message.success {
+    color: var(--success);
+    text-shadow: 0 0 20px var(--success-glow);
+    animation: pulseText 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulseText {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  /* Coords strip */
+  .coords-strip {
+    width: 100%;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 3px;
+    padding: 10px 14px;
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .coords-strip span {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .coords-strip .val {
+    color: rgba(255,255,255,0.4);
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* Status dot */
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .dot.active { background: var(--success); box-shadow: 0 0 8px var(--success); animation: blink 1.5s infinite; }
+  .dot.error { background: #ff4444; box-shadow: 0 0 8px rgba(255,68,68,0.5); }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Loading state */
+  .loading-msg {
+    font-size: 0.75rem;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+    text-align: center;
+    animation: fade 1s ease-in-out infinite alternate;
+  }
+  @keyframes fade { from { opacity: 0.4; } to { opacity: 1; } }
+
+  /* Accuracy bar */
+  .accuracy-wrap {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.55rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+  }
+
+  .accuracy-bar {
+    flex: 1;
+    height: 3px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .accuracy-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.5s ease;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>CHURRO<br>RADAR</h1>
+    <div class="subtitle">Sistema de navegación · v1.0</div>
+  </div>
+
+  <div class="compass-card" id="compassCard">
+    <div class="arrow-wrap">
+      <div class="ring"></div>
+      <div class="ring"></div>
+
+      <div class="arrow-container" id="arrowContainer">
+        <svg viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Arrow pointing up (north) -->
+          <polygon points="45,5 65,75 45,60 25,75" fill="#ff6b35"/>
+          <polygon points="45,5 65,75 45,60 25,75" fill="url(#arrowGrad)" opacity="0.6"/>
+          <circle cx="45" cy="45" r="8" fill="#0a0a0f" stroke="#ff6b35" stroke-width="2"/>
+          <circle cx="45" cy="45" r="3" fill="#ffd23f"/>
+          <defs>
+            <linearGradient id="arrowGrad" x1="45" y1="5" x2="45" y2="75" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#ffd23f"/>
+              <stop offset="100%" stop-color="#ff6b35"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+
+      <div class="success-icon" id="successIcon">🎓</div>
+    </div>
+
+    <div class="message" id="message">
+      <span class="loading-msg">Obteniendo ubicación...</span>
+    </div>
+
+    <div class="info-row" id="infoRow" style="display:none">
+      <div class="info-box">
+        <div class="label">Distancia</div>
+        <div class="value" id="distValue">—</div>
+        <div class="unit" id="distUnit">metros</div>
+      </div>
+      <div class="info-box">
+        <div class="label">Rumbo</div>
+        <div class="value" id="bearingValue">—</div>
+        <div class="unit">grados</div>
+      </div>
+    </div>
+
+    <div class="accuracy-wrap" id="accuracyWrap" style="display:none">
+      <span>PRECISIÓN</span>
+      <div class="accuracy-bar">
+        <div class="accuracy-fill" id="accuracyFill" style="width:0%"></div>
+      </div>
+      <span id="accuracyVal">—</span>
+    </div>
+  </div>
+
+  <div class="coords-strip">
+    <span><span>TU POSICIÓN</span> <span class="val" id="myCoords">esperando GPS...</span></span>
+    <span><span>DESTINO</span> <span class="val">43.537819, -5.707153</span></span>
+  </div>
+
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Iniciando GPS</span>
+  </div>
+</div>
+
+<script>
+  const TARGET = { lat: 43.537819, lng: -5.707153 };
+  const RADIUS = 70; // metros
+
+  const arrowContainer = document.getElementById('arrowContainer');
+  const successIcon = document.getElementById('successIcon');
+  const messageEl = document.getElementById('message');
+  const distValue = document.getElementById('distValue');
+  const distUnit = document.getElementById('distUnit');
+  const bearingValue = document.getElementById('bearingValue');
+  const infoRow = document.getElementById('infoRow');
+  const accuracyWrap = document.getElementById('accuracyWrap');
+  const accuracyFill = document.getElementById('accuracyFill');
+  const accuracyVal = document.getElementById('accuracyVal');
+  const myCoords = document.getElementById('myCoords');
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const body = document.body;
+  const compassCard = document.getElementById('compassCard');
+
+  let deviceHeading = 0;
+  let lastPos = null;
+
+  // Haversine distance in metres
+  function distanceTo(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  // Bearing from current to target (degrees, 0=N)
+  function bearingTo(lat1, lng1, lat2, lng2) {
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const y = Math.sin(dLng) * Math.cos(lat2 * Math.PI / 180);
+    const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180)
+            - Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLng);
+    return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+  }
+
+  function formatDist(m) {
+    if (m >= 1000) {
+      return { val: (m/1000).toFixed(1), unit: 'km' };
+    }
+    return { val: Math.round(m).toString(), unit: 'metros' };
+  }
+
+  let isInClass = false;
+
+  function update(pos) {
+    const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+    lastPos = { lat, lng };
+
+    // Update coords display
+    myCoords.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+    // Status
+    statusDot.className = 'dot active';
+    statusText.textContent = 'GPS activo';
+
+    // Accuracy bar (100% = <5m, 0% = >100m)
+    const accPct = Math.max(0, Math.min(100, 100 - (accuracy - 5)));
+    accuracyFill.style.width = accPct + '%';
+    accuracyVal.textContent = Math.round(accuracy) + 'm';
+    accuracyWrap.style.display = 'flex';
+
+    const dist = distanceTo(lat, lng, TARGET.lat, TARGET.lng);
+    const bearing = bearingTo(lat, lng, TARGET.lat, TARGET.lng);
+
+    if (dist <= RADIUS) {
+      // SUCCESS — in class!
+      if (!isInClass) {
+        isInClass = true;
+        arrowContainer.style.display = 'none';
+        successIcon.style.display = 'flex';
+        body.classList.add('success-mode');
+        infoRow.style.display = 'none';
+        messageEl.className = 'message success';
+        messageEl.textContent = '¡Estás en clase!';
+        compassCard.style.borderColor = 'rgba(78, 204, 163, 0.4)';
+      }
+    } else {
+      // Navigate!
+      if (isInClass) {
+        isInClass = false;
+        arrowContainer.style.display = 'flex';
+        successIcon.style.display = 'none';
+        body.classList.remove('success-mode');
+        infoRow.style.display = 'grid';
+        compassCard.style.borderColor = 'rgba(255,107,53,0.2)';
+      }
+
+      if (!isInClass) {
+        arrowContainer.style.display = 'flex';
+        infoRow.style.display = 'grid';
+      }
+
+      // Rotate arrow: bearing relative to device heading
+      const arrowAngle = bearing - deviceHeading;
+      arrowContainer.style.transform = `rotate(${arrowAngle}deg)`;
+      bearingValue.textContent = Math.round(bearing) + '°';
+
+      const { val, unit } = formatDist(dist);
+      distValue.textContent = val;
+      distUnit.textContent = unit;
+
+      messageEl.className = 'message';
+      messageEl.textContent = '¡Unos churrinos?!!';
+    }
+  }
+
+  function onError(err) {
+    statusDot.className = 'dot error';
+    statusText.textContent = 'Error GPS';
+    messageEl.className = 'message';
+    let msg;
+    switch(err.code) {
+      case 1: msg = 'Permiso denegado 😔'; break;
+      case 2: msg = 'Señal GPS perdida'; break;
+      case 3: msg = 'Tiempo de espera agotado'; break;
+      default: msg = 'Error desconocido';
+    }
+    messageEl.innerHTML = `<span style="font-size:0.8rem;color:var(--muted)">${msg}</span>`;
+  }
+
+  // Device orientation for compass heading
+  function handleOrientation(e) {
+    if (e.webkitCompassHeading !== undefined) {
+      // iOS
+      deviceHeading = e.webkitCompassHeading;
+    } else if (e.alpha !== null) {
+      // Android — alpha is counterclockwise from north
+      deviceHeading = (360 - e.alpha) % 360;
+    }
+    if (lastPos && !isInClass) {
+      const bearing = bearingTo(lastPos.lat, lastPos.lng, TARGET.lat, TARGET.lng);
+      arrowContainer.style.transform = `rotate(${bearing - deviceHeading}deg)`;
+    }
+  }
+
+  // Request orientation permission (iOS 13+)
+  async function requestOrientation() {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm === 'granted') {
+          window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+          window.addEventListener('deviceorientation', handleOrientation, true);
+        }
+      } catch(e) {}
+    } else {
+      window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+      window.addEventListener('deviceorientation', handleOrientation, true);
+    }
+  }
+
+  requestOrientation();
+
+  // Start GPS
+  if ('geolocation' in navigator) {
+    navigator.geolocation.watchPosition(update, onError, {
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 10000
+    });
+  } else {
+    messageEl.innerHTML = '<span style="font-size:0.75rem;color:var(--muted)">GPS no disponible</span>';
+    statusDot.className = 'dot error';
+    statusText.textContent = 'Sin soporte GPS';
+  }
+</script>
+</body>
+</html>
