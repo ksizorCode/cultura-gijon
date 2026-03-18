@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flecha hacia objetivo</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 20px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin: 12px 0; }
+    #arrowWrap { width: 180px; height: 180px; display: grid; place-items: center; border: 1px solid #eee; border-radius: 16px; }
+    #arrow {
+      width: 0; height: 0;
+      border-left: 26px solid transparent;
+      border-right: 26px solid transparent;
+      border-bottom: 70px solid #111;
+      transform: rotate(0deg);
+      transform-origin: 50% 70%;
+    }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    .ok { color: #0a7; font-weight: 700; }
+    .warn { color: #c60; font-weight: 700; }
+    .err { color: #c00; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<h1>Flecha que indica dónde ir</h1>
+
+<div class="card">
+  <div class="row">
+    <button id="btnStart">Iniciar</button>
+    <button id="btnStop" disabled>Parar</button>
+    <button id="btnCompass" disabled>Activar brújula</button>
+  </div>
+  <p id="status" class="warn">Sin iniciar</p>
+  <p><small>Necesitas HTTPS o localhost. En iOS hay que pulsar “Activar brújula”.</small></p>
+</div>
+
+<div class="card row" style="align-items:center;">
+  <div id="arrowWrap"><div id="arrow"></div></div>
+  <div>
+    <p><b>Objetivo:</b> <code id="goalTxt"></code></p>
+    <p><b>Distancia:</b> <span id="distTxt">-</span></p>
+    <p><b>Rumbo al objetivo (bearing):</b> <span id="bearingTxt">-</span>°</p>
+    <p><b>Tu orientación (heading):</b> <span id="headingTxt">-</span>°</p>
+    <p><b>Giro flecha:</b> <span id="turnTxt">-</span>°</p>
+  </div>
+</div>
+
+<script>
+  // ====== CONFIG ======
+  // Cambia estas coordenadas
+  const GOAL = { lat: 40.417200, lon: -3.703300, name: "Punto objetivo" };
+  // Si estás dentro de este radio, consideramos que “ya llegaste”
+  const ARRIVE_RADIUS_M = 25;
+
+  // ====== ESTADO ======
+  let watchId = null;
+  let lastPos = null;
+
+  // heading del dispositivo (0..360) donde 0 = norte
+  let deviceHeading = null; // null si no tenemos brújula
+
+  const $ = (id) => document.getElementById(id);
+  $("goalTxt").textContent = `${GOAL.name} (${GOAL.lat.toFixed(6)}, ${GOAL.lon.toFixed(6)})`;
+
+  function setStatus(text, cls="warn") {
+    $("status").className = cls;
+    $("status").textContent = text;
+  }
+
+  // ====== GEO MATH ======
+  const toRad = (d) => d * Math.PI / 180;
+  const toDeg = (r) => r * 180 / Math.PI;
+
+  function distanceMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat/2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * (Math.sin(dLon/2) ** 2);
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // Bearing (rumbo) desde (lat1,lon1) hacia (lat2,lon2) en grados (0..360), 0=N
+  function bearingDegrees(lat1, lon1, lat2, lon2) {
+    const φ1 = toRad(lat1), φ2 = toRad(lat2);
+    const Δλ = toRad(lon2 - lon1);
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    const θ = Math.atan2(y, x);
+    return (toDeg(θ) + 360) % 360;
+  }
+
+  // Normaliza ángulo a (-180..180)
+  function normalizeTurn(deg) {
+    let d = ((deg + 180) % 360) - 180;
+    if (d < -180) d += 360;
+    return d;
+  }
+
+  // ====== FLECHA ======
+  function updateArrow() {
+    if (!lastPos) return;
+
+    const { latitude: lat, longitude: lon, accuracy } = lastPos.coords;
+    const dist = distanceMeters(lat, lon, GOAL.lat, GOAL.lon);
+    const bearing = bearingDegrees(lat, lon, GOAL.lat, GOAL.lon);
+
+    $("distTxt").textContent = `${Math.round(dist)} m (±${Math.round(accuracy)}m)`;
+    $("bearingTxt").textContent = bearing.toFixed(0);
+
+    // Si no hay brújula, mostramos la flecha “sin orientar” (solo indicativo)
+    // Con brújula: giro = bearing - heading
+    const heading = deviceHeading;
+    $("headingTxt").textContent = (heading == null) ? "—" : heading.toFixed(0);
+
+    let turn;
+    if (heading == null) {
+      // Sin brújula: flecha fija (0°) y mostramos texto
+      turn = 0;
+      $("turnTxt").textContent = "Activa brújula";
+      setStatus("Geolocalización OK. Activa brújula para flecha real.", "warn");
+    } else {
+      turn = normalizeTurn(bearing - heading);
+      $("turnTxt").textContent = turn.toFixed(0);
+      setStatus("Geolocalización + brújula OK.", "ok");
+    }
+
+    $("arrow").style.transform = `rotate(${turn}deg)`;
+
+    if (dist <= ARRIVE_RADIUS_M) {
+      setStatus("✅ ¡Has llegado al objetivo!", "ok");
+    }
+  }
+
+  // ====== GEOLOCATION ======
+  function startGeo() {
+    if (!("geolocation" in navigator)) {
+      setStatus("Tu navegador no soporta geolocalización.", "err");
+      return;
+    }
+    $("btnStart").disabled = true;
+    $("btnStop").disabled = false;
+    $("btnCompass").disabled = false;
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        lastPos = pos;
+        updateArrow();
+      },
+      (err) => {
+        setStatus(`Error geolocalización: ${err.message}`, "err");
+        stopAll();
+      },
+      { enableHighAccuracy: true, maximumAge: 500, timeout: 10000 }
+    );
+  }
+
+  function stopAll() {
+    if (watchId != null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    lastPos = null;
+    deviceHeading = null;
+
+    $("btnStart").disabled = false;
+    $("btnStop").disabled = true;
+    $("btnCompass").disabled = true;
+    $("headingTxt").textContent = "—";
+    $("turnTxt").textContent = "—";
+    $("distTxt").textContent = "—";
+    $("bearingTxt").textContent = "—";
+    $("arrow").style.transform = "rotate(0deg)";
+    setStatus("Parado.", "warn");
+  }
+
+  // ====== COMPASS (DeviceOrientation) ======
+  async function enableCompass() {
+    // iOS requiere permiso explícito en un gesto de usuario
+    try {
+      if (typeof DeviceOrientationEvent !== "undefined" &&
+          typeof DeviceOrientationEvent.requestPermission === "function") {
+        const p = await DeviceOrientationEvent.requestPermission();
+        if (p !== "granted") {
+          setStatus("Permiso de brújula denegado.", "err");
+          return;
+        }
+      }
+      window.addEventListener("deviceorientation", onDeviceOrientation, true);
+      setStatus("Brújula activada. Mueve el móvil en forma de 8 para calibrar.", "ok");
+    } catch (e) {
+      setStatus("No se pudo activar la brújula en este dispositivo/navegador.", "err");
+    }
+  }
+
+  function onDeviceOrientation(e) {
+    // e.alpha: 0..360 (rotación respecto al norte) en algunos Android
+    // En iOS Safari, usar webkitCompassHeading si existe (más fiable)
+    if (typeof e.webkitCompassHeading === "number") {
+      deviceHeading = e.webkitCompassHeading; // 0=N
+    } else if (typeof e.alpha === "number") {
+      // alpha suele ser “rumbo” pero depende del dispositivo/navegador.
+      // Lo dejamos tal cual como aproximación.
+      deviceHeading = (360 - e.alpha) % 360; // truco habitual para convertir a heading
+    } else {
+      deviceHeading = null;
+    }
+    updateArrow();
+  }
+
+  // ====== UI EVENTS ======
+  $("btnStart").addEventListener("click", startGeo);
+  $("btnStop").addEventListener("click", stopAll);
+  $("btnCompass").addEventListener("click", enableCompass);
+</script>
+
+</body>
+</html>

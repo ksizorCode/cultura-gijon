@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gincana: flecha + coordenadas de test</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 20px; line-height: 1.35; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin: 12px 0; }
+    #arrowWrap { width: 180px; height: 180px; display: grid; place-items: center; border: 1px solid #eee; border-radius: 16px; }
+    #arrow {
+      width: 0; height: 0;
+      border-left: 26px solid transparent;
+      border-right: 26px solid transparent;
+      border-bottom: 70px solid #111;
+      transform: rotate(0deg);
+      transform-origin: 50% 70%;
+    }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+    input { padding: 8px 10px; border-radius: 10px; border: 1px solid #ccc; width: 180px; }
+    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    .ok { color: #0a7; font-weight: 700; }
+    .warn { color: #c60; font-weight: 700; }
+    .err { color: #c00; font-weight: 700; }
+    small { color: #666; }
+  </style>
+</head>
+
+<body>
+  <h1>Gincana (GPS + brújula) con objetivo editable</h1>
+
+  <div class="card">
+    <div class="row">
+      <button id="btnStart">Iniciar</button>
+      <button id="btnStop" disabled>Parar</button>
+      <button id="btnCompass" disabled>Activar brújula</button>
+    </div>
+    <p id="status" class="warn">Sin iniciar</p>
+    <p><small>Geolocalización suele requerir HTTPS (en CodePen a veces funciona, depende del navegador). En iOS debes pulsar “Activar brújula”.</small></p>
+  </div>
+
+  <div class="card">
+    <h2>Test de coordenadas (manual)</h2>
+    <div class="row">
+      <label>
+        Latitud<br>
+        <input id="inputLat" type="number" step="0.000001" placeholder="40.417200">
+      </label>
+      <label>
+        Longitud<br>
+        <input id="inputLon" type="number" step="0.000001" placeholder="-3.703300">
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <button id="btnSetGoal">Usar estas coordenadas</button>
+      <button id="btnUseCurrent">Usar mi ubicación actual</button>
+      <button id="btnResetGoal">Volver al objetivo real</button>
+    </div>
+
+    <p><small>“Usar mi ubicación actual” rellena los campos y pone el objetivo en tu posición para que puedas probar moviéndote unos metros.</small></p>
+  </div>
+
+  <div class="card row" style="align-items:center;">
+    <div id="arrowWrap"><div id="arrow"></div></div>
+    <div>
+      <p><b>Objetivo:</b> <code id="goalTxt"></code></p>
+      <p><b>Distancia:</b> <span id="distTxt">-</span></p>
+      <p><b>Rumbo al objetivo (bearing):</b> <span id="bearingTxt">-</span>°</p>
+      <p><b>Tu orientación (heading):</b> <span id="headingTxt">-</span>°</p>
+      <p><b>Giro flecha:</b> <span id="turnTxt">-</span>°</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Posición (debug)</h2>
+    <p>Lat: <code id="curLat">-</code> | Lon: <code id="curLon">-</code></p>
+    <p>Precisión: <code id="curAcc">-</code> m</p>
+  </div>
+
+  <script>
+    // ====== CONFIG ======
+    // Objetivo real por defecto (cámbialo a tus coordenadas)
+    const REAL_GOAL = { lat: 40.417200, lon: -3.703300, name: "Objetivo real" };
+
+    // Objetivo activo (mutable)
+    let GOAL = { ...REAL_GOAL };
+
+    // Si estás dentro de este radio, consideramos que “ya llegaste”
+    const ARRIVE_RADIUS_M = 25;
+
+    // ====== ESTADO ======
+    let watchId = null;
+    let lastPos = null;
+
+    // heading del dispositivo (0..360) donde 0 = norte
+    let deviceHeading = null; // null si no tenemos brújula
+
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(text, cls="warn") {
+      $("status").className = cls;
+      $("status").textContent = text;
+    }
+
+    function setGoalText() {
+      $("goalTxt").textContent = `${GOAL.name} (${GOAL.lat.toFixed(6)}, ${GOAL.lon.toFixed(6)})`;
+    }
+    setGoalText();
+
+    // ====== GEO MATH ======
+    const toRad = (d) => d * Math.PI / 180;
+    const toDeg = (r) => r * 180 / Math.PI;
+
+    function distanceMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat/2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * (Math.sin(dLon/2) ** 2);
+      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // Bearing (rumbo) desde (lat1,lon1) hacia (lat2,lon2) en grados (0..360), 0=N
+    function bearingDegrees(lat1, lon1, lat2, lon2) {
+      const φ1 = toRad(lat1), φ2 = toRad(lat2);
+      const Δλ = toRad(lon2 - lon1);
+      const y = Math.sin(Δλ) * Math.cos(φ2);
+      const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+      const θ = Math.atan2(y, x);
+      return (toDeg(θ) + 360) % 360;
+    }
+
+    // Normaliza ángulo a (-180..180)
+    function normalizeTurn(deg) {
+      let d = ((deg + 180) % 360) - 180;
+      if (d < -180) d += 360;
+      return d;
+    }
+
+    // ====== UI / FLECHA ======
+    function updateDebugUI(pos) {
+      $("curLat").textContent = pos.coords.latitude.toFixed(6);
+      $("curLon").textContent = pos.coords.longitude.toFixed(6);
+      $("curAcc").textContent = Math.round(pos.coords.accuracy);
+    }
+
+    function updateArrow() {
+      if (!lastPos) return;
+
+      const { latitude: lat, longitude: lon, accuracy } = lastPos.coords;
+
+      const dist = distanceMeters(lat, lon, GOAL.lat, GOAL.lon);
+      const bearing = bearingDegrees(lat, lon, GOAL.lat, GOAL.lon);
+
+      $("distTxt").textContent = `${Math.round(dist)} m (±${Math.round(accuracy)}m)`;
+      $("bearingTxt").textContent = bearing.toFixed(0);
+
+      const heading = deviceHeading;
+      $("headingTxt").textContent = (heading == null) ? "—" : heading.toFixed(0);
+
+      let turn;
+      if (heading == null) {
+        // Sin brújula: la flecha no sabe hacia dónde “mirar” respecto al mundo real
+        turn = 0;
+        $("turnTxt").textContent = "Activa brújula";
+        setStatus("GPS OK. Activa brújula para flecha real.", "warn");
+      } else {
+        turn = normalizeTurn(bearing - heading);
+        $("turnTxt").textContent = turn.toFixed(0);
+        setStatus("GPS + brújula OK.", "ok");
+      }
+
+      $("arrow").style.transform = `rotate(${turn}deg)`;
+
+      if (dist <= ARRIVE_RADIUS_M) {
+        setStatus("✅ ¡Has llegado al objetivo!", "ok");
+      }
+    }
+
+    // ====== GEOLOCATION ======
+    function startGeo() {
+      if (!("geolocation" in navigator)) {
+        setStatus("Tu navegador no soporta geolocalización.", "err");
+        return;
+      }
+
+      $("btnStart").disabled = true;
+      $("btnStop").disabled = false;
+      $("btnCompass").disabled = false;
+      setStatus("Solicitando permiso y leyendo posición…", "warn");
+
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          lastPos = pos;
+          updateDebugUI(pos);
+          updateArrow();
+        },
+        (err) => {
+          setStatus(`Error geolocalización: ${err.message}`, "err");
+          stopAll();
+        },
+        { enableHighAccuracy: true, maximumAge: 500, timeout: 10000 }
+      );
+    }
+
+    function stopAll() {
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      lastPos = null;
+      deviceHeading = null;
+
+      window.removeEventListener("deviceorientation", onDeviceOrientation, true);
+
+      $("btnStart").disabled = false;
+      $("btnStop").disabled = true;
+      $("btnCompass").disabled = true;
+
+      $("headingTxt").textContent = "—";
+      $("turnTxt").textContent = "—";
+      $("distTxt").textContent = "—";
+      $("bearingTxt").textContent = "—";
+      $("curLat").textContent = "—";
+      $("curLon").textContent = "—";
+      $("curAcc").textContent = "—";
+
+      $("arrow").style.transform = "rotate(0deg)";
+      setStatus("Parado.", "warn");
+    }
+
+    // ====== COMPASS (DeviceOrientation) ======
+    async function enableCompass() {
+      try {
+        // iOS requiere permiso explícito en un gesto de usuario
+        if (typeof DeviceOrientationEvent !== "undefined" &&
+            typeof DeviceOrientationEvent.requestPermission === "function") {
+          const p = await DeviceOrientationEvent.requestPermission();
+          if (p !== "granted") {
+            setStatus("Permiso de brújula denegado.", "err");
+            return;
+          }
+        }
+        window.addEventListener("deviceorientation", onDeviceOrientation, true);
+        setStatus("Brújula activada. (Tip: mueve el móvil en forma de 8 para calibrar.)", "ok");
+      } catch (e) {
+        setStatus("No se pudo activar la brújula en este dispositivo/navegador.", "err");
+      }
+    }
+
+    function onDeviceOrientation(e) {
+      // iOS Safari: webkitCompassHeading es lo más fiable
+      if (typeof e.webkitCompassHeading === "number") {
+        deviceHeading = e.webkitCompassHeading; // 0=N
+      } else if (typeof e.alpha === "number") {
+        // Android/otros: aproximación común
+        deviceHeading = (360 - e.alpha) % 360;
+      } else {
+        deviceHeading = null;
+      }
+      updateArrow();
+    }
+
+    // ====== TEST COORDS: set / reset / use current ======
+    $("btnSetGoal").addEventListener("click", () => {
+      const lat = parseFloat($("inputLat").value);
+      const lon = parseFloat($("inputLon").value);
+
+      if (Number.isNaN(lat) || Number.isNaN(lon)) {
+        alert("Introduce coordenadas válidas");
+        return;
+      }
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        alert("Rangos inválidos:\nLat: -90 a 90\nLon: -180 a 180");
+        return;
+      }
+
+      GOAL = { lat, lon, name: "Objetivo de prueba" };
+      setGoalText();
+      updateArrow();
+      alert("🎯 Objetivo de prueba activado");
+    });
+
+    $("btnResetGoal").addEventListener("click", () => {
+      GOAL = { ...REAL_GOAL };
+      setGoalText();
+      updateArrow();
+      alert("↩️ Objetivo real restaurado");
+    });
+
+    $("btnUseCurrent").addEventListener("click", () => {
+      if (!lastPos) {
+        alert("Aún no hay posición GPS. Pulsa 'Iniciar' primero.");
+        return;
+      }
+
+      const lat = lastPos.coords.latitude;
+      const lon = lastPos.coords.longitude;
+
+      $("inputLat").value = lat.toFixed(6);
+      $("inputLon").value = lon.toFixed(6);
+
+      GOAL = { lat, lon, name: "Objetivo desde posición actual" };
+      setGoalText();
+      updateArrow();
+      alert("📍 Objetivo fijado en tu ubicación actual");
+    });
+
+    // ====== BOTONES PRINCIPALES ======
+    $("btnStart").addEventListener("click", startGeo);
+    $("btnStop").addEventListener("click", stopAll);
+    $("btnCompass").addEventListener("click", enableCompass);
+  </script>
+</body>
+</html>

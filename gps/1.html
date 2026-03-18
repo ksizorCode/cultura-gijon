@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gincana por Geolocalización</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 20px; line-height: 1.35; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    .ok { color: #0a7; font-weight: 700; }
+    .warn { color: #c60; font-weight: 700; }
+    .err { color: #c00; font-weight: 700; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+    small { color: #666; }
+    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+
+  <h1>Gincana interactiva (geocercas)</h1>
+
+  <div class="card">
+    <button id="btnStart">Iniciar geolocalización</button>
+    <button id="btnStop" disabled>Parar</button>
+    <p id="status"><span class="warn">Sin iniciar</span></p>
+    <p><small>Tip: prueba en móvil con HTTPS. En iOS/Android, la precisión mejora con GPS activo.</small></p>
+  </div>
+
+  <div class="card">
+    <h2>Posición</h2>
+    <p>Lat: <code id="lat">-</code> | Lon: <code id="lon">-</code></p>
+    <p>Precisión: <code id="acc">-</code> m</p>
+  </div>
+
+  <div class="card">
+    <h2>Juego</h2>
+    <p><strong>Zona actual:</strong> <span id="zoneName">Ninguna</span></p>
+    <p><strong>Mensaje:</strong> <span id="zoneMsg">-</span></p>
+    <p><strong>Objetivo:</strong> <span id="goalInfo">-</span></p>
+    <p><strong>Distancia al objetivo:</strong> <span id="goalDist">-</span></p>
+  </div>
+
+  <script>
+    // =========================
+    // CONFIGURACIÓN DEL JUEGO
+    // =========================
+    // Define "zonas" (geocercas) como círculos.
+    // Dentro de cada zona, puedes definir un objetivo (otro punto) que el usuario debe alcanzar.
+    const ZONES = [
+      {
+        id: "plaza_central",
+        name: "Plaza Central",
+        center: { lat: 40.416775, lon: -3.703790 }, // <-- ejemplo (Madrid centro)
+        radiusMeters: 120, // radio de la zona
+        message: "¡Has llegado a la Plaza Central! Busca una pista: una estatua o placa cercana.",
+        goal: {
+          name: "Punto objetivo A",
+          lat: 40.417200,
+          lon: -3.703300,
+          arriveRadiusMeters: 25,
+          arriveMessage: "✅ ¡Objetivo A completado! Siguiente reto desbloqueado."
+        }
+      },
+      {
+        id: "parque",
+        name: "Parque",
+        center: { lat: 40.415200, lon: -3.707200 },
+        radiusMeters: 150,
+        message: "Estás en el Parque. Encuentra un banco rojo y hazte una foto (reto opcional).",
+        goal: {
+          name: "Punto objetivo B",
+          lat: 40.414800,
+          lon: -3.706400,
+          arriveRadiusMeters: 30,
+          arriveMessage: "✅ ¡Objetivo B completado! Has terminado la ruta."
+        }
+      }
+    ];
+
+    // Si no estás en ninguna zona, puedes opcionalmente tener un "objetivo global"
+    // o simplemente no mostrar nada.
+    const OUTSIDE_MESSAGE = "Muévete hacia una zona de juego para empezar.";
+
+    // =========================
+    // UTILIDADES GEO
+    // =========================
+    // Haversine: distancia aproximada entre 2 puntos en metros
+    function distanceMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // radio Tierra (m)
+      const toRad = (d) => d * Math.PI / 180;
+
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    function findZone(lat, lon) {
+      for (const z of ZONES) {
+        const d = distanceMeters(lat, lon, z.center.lat, z.center.lon);
+        if (d <= z.radiusMeters) return { zone: z, distToCenter: d };
+      }
+      return null;
+    }
+
+    // =========================
+    // ESTADO DEL JUEGO
+    // =========================
+    let watchId = null;
+    let currentZoneId = null;
+    let completedGoals = new Set();
+
+    // =========================
+    // UI
+    // =========================
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(html, cls) {
+      $("status").innerHTML = `<span class="${cls}">${html}</span>`;
+    }
+
+    function updatePositionUI(pos) {
+      $("lat").textContent = pos.coords.latitude.toFixed(6);
+      $("lon").textContent = pos.coords.longitude.toFixed(6);
+      $("acc").textContent = Math.round(pos.coords.accuracy);
+    }
+
+    function updateGameUI({ zone, distToCenter }, lat, lon) {
+      // Si entras por primera vez (o cambias) mostramos "evento de entrada"
+      if (zone.id !== currentZoneId) {
+        currentZoneId = zone.id;
+        // Aquí podrías disparar sonido, vibración, modal, etc.
+        alert(`📍 Zona detectada: ${zone.name}\n\n${zone.message}`);
+      }
+
+      $("zoneName").textContent = zone.name;
+      $("zoneMsg").textContent = zone.message;
+
+      // Objetivo dentro de la zona
+      if (zone.goal) {
+        $("goalInfo").textContent = `${zone.goal.name} (llega a ~${zone.goal.arriveRadiusMeters}m)`;
+        const dGoal = distanceMeters(lat, lon, zone.goal.lat, zone.goal.lon);
+        $("goalDist").textContent = `${Math.round(dGoal)} m`;
+
+        // Completado
+        if (!completedGoals.has(zone.id) && dGoal <= zone.goal.arriveRadiusMeters) {
+          completedGoals.add(zone.id);
+          alert(zone.goal.arriveMessage);
+        }
+      } else {
+        $("goalInfo").textContent = "-";
+        $("goalDist").textContent = "-";
+      }
+    }
+
+    function updateOutsideUI() {
+      currentZoneId = null;
+      $("zoneName").textContent = "Ninguna";
+      $("zoneMsg").textContent = OUTSIDE_MESSAGE;
+      $("goalInfo").textContent = "-";
+      $("goalDist").textContent = "-";
+    }
+
+    // =========================
+    // GEOLOCALIZACIÓN
+    // =========================
+    function start() {
+      if (!("geolocation" in navigator)) {
+        setStatus("Tu navegador no soporta geolocalización.", "err");
+        return;
+      }
+
+      $("btnStart").disabled = true;
+      $("btnStop").disabled = false;
+      setStatus("Solicitando permiso y leyendo posición…", "warn");
+
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          updatePositionUI(pos);
+
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+
+          // Nota: la precisión importa. Si accuracy es muy grande, podrías ignorar lecturas
+          // por ejemplo: if (pos.coords.accuracy > 80) return;
+
+          const found = findZone(lat, lon);
+          if (found) {
+            setStatus("Posición OK. Zona activa.", "ok");
+            updateGameUI(found, lat, lon);
+          } else {
+            setStatus("Posición OK. Fuera de zonas.", "warn");
+            updateOutsideUI();
+          }
+        },
+        (err) => {
+          // Errores típicos: PERMISSION_DENIED, POSITION_UNAVAILABLE, TIMEOUT
+          $("btnStart").disabled = false;
+          $("btnStop").disabled = true;
+          setStatus(`Error: ${err.message}`, "err");
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 1000, // ms
+          timeout: 10000 // ms
+        }
+      );
+    }
+
+    function stop() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      $("btnStart").disabled = false;
+      $("btnStop").disabled = true;
+      setStatus("Parado.", "warn");
+    }
+
+    $("btnStart").addEventListener("click", start);
+    $("btnStop").addEventListener("click", stop);
+  </script>
+</body>
+</html>
